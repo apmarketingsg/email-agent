@@ -101,7 +101,7 @@ All secrets live in `.env` (never committed). Copy `.env.example` and fill in:
 
 | Variable | Purpose | Required |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | Claude API key | Yes |
+| `GEMINI_API_KEY` | Google Gemini API key | Yes |
 | `EMAIL_HOST` | SMTP server (default: `smtp.gmail.com`) | No |
 | `EMAIL_PORT` | SMTP port (default: `587`) | No |
 | `EMAIL_USER` | Gmail address | Yes |
@@ -173,7 +173,7 @@ Each scraper:
 
 ### LLM Usage
 
-- Model: `claude-sonnet-4-6` for article analysis
+- Model: `gemini-1.5-flash` (free tier) for article analysis
 - System prompts are versioned in `src/prompts/` — never hardcode prompts inline
 - Each article gets one API call; responses must be valid JSON
 
@@ -203,7 +203,7 @@ python -m pytest tests/
 
 | Package | Purpose |
 |---|---|
-| `anthropic` | Anthropic Claude API client |
+| `google-generativeai` | Google Gemini API client |
 | `requests` | HTTP requests for scraping |
 | `beautifulsoup4` + `lxml` | HTML parsing |
 | `feedparser` | RSS/Atom feed parsing |

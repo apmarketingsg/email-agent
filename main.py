@@ -85,7 +85,7 @@ def run_digest() -> None:
         logger.info("All articles already sent. Nothing to do.")
         return
 
-    # 3. Analyze each article with Claude (summary, companies, angle)
+    # 3. Analyze each article with Gemini (summary, companies, angle)
     scraper_instance = CNAScraper()  # use BaseScraper's fetch_article_text
     enriched = analyze_articles(new_articles, scraper_instance.fetch_article_text)
 
@@ -133,7 +133,7 @@ def main() -> None:
 
 
 def _validate_env() -> None:
-    required = ["ANTHROPIC_API_KEY", "EMAIL_USER", "EMAIL_PASS", "EMAIL_TO"]
+    required = ["GEMINI_API_KEY", "EMAIL_USER", "EMAIL_PASS", "EMAIL_TO"]
     missing = [v for v in required if not os.environ.get(v)]
     if missing:
         logger.error("Missing required environment variables: %s", ", ".join(missing))
