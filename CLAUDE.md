@@ -37,6 +37,7 @@ email-agent/
 ├── data/                            # Runtime data — gitignored
 │   └── sent_articles.db             # SQLite dedup DB (auto-created)
 ├── main.py                          # Scheduler entry point
+├── run.sh                           # Cron wrapper for Namecheap shared hosting
 ├── requirements.txt
 ├── .env.example
 ├── .gitignore
@@ -92,6 +93,50 @@ python main.py --once
 # Start the scheduler (runs continuously at 00:00, 08:00, 16:00 SGT):
 python main.py
 ```
+
+---
+
+## Deployment (Namecheap Shared Hosting / cPanel)
+
+Shared hosting cannot run a persistent process, so `APScheduler` is bypassed.
+Instead, three cPanel cron jobs each call `run.sh`, which runs `main.py --once`.
+
+### One-time server setup (via cPanel → Terminal or SSH)
+
+```bash
+# 1. Upload / clone the repo into your home directory, e.g. ~/email-agent
+
+# 2. Create virtualenv and install dependencies
+cd ~/email-agent
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+
+# 3. Create .env with your secrets
+cp .env.example .env
+nano .env          # fill in GEMINI_API_KEY, EMAIL_*, etc.
+
+# 4. Make the wrapper executable
+chmod +x run.sh
+
+# 5. Smoke-test
+bash run.sh
+# Check data/logs/cron.log for output
+```
+
+### cPanel Cron Jobs
+
+Go to **cPanel → Cron Jobs** and add three entries (replace `/home/USERNAME`
+with your actual home path):
+
+| Minute | Hour | Day | Month | Weekday | Command |
+|--------|------|-----|-------|---------|---------|
+| 0 | 16 | * | * | * | `/bin/bash /home/USERNAME/email-agent/run.sh` |
+| 0 | 0  | * | * | * | `/bin/bash /home/USERNAME/email-agent/run.sh` |
+| 0 | 8  | * | * | * | `/bin/bash /home/USERNAME/email-agent/run.sh` |
+
+These UTC times equal 00:00, 08:00, 16:00 SGT (UTC+8).
+
+Logs are written to `data/logs/cron.log` (gitignored).
 
 ---
 
