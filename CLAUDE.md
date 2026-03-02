@@ -6,9 +6,9 @@ This file provides guidance for AI assistants (Claude and others) working in thi
 
 ## Project Overview
 
-**email-agent** is a repository owned by `apmarketingsg`. As of the initial commit (2026-03-02), the project is freshly initialized and contains no source code yet.
+**email-agent** is a repository owned by `apmarketingsg`.
 
-**Intended purpose:** An AI-powered email agent — likely responsible for reading, processing, drafting, or automating email workflows using LLM capabilities.
+**Purpose:** An AI-powered Singapore business news digest agent. It scrapes 7 Singapore business news websites every 8 hours (00:00, 08:00, 16:00 SGT), enriches each article using Claude (30-word summary, companies identified, insurance-broker conversation angle), and emails a formatted HTML digest to the configured recipient.
 
 ---
 
@@ -16,11 +16,33 @@ This file provides guidance for AI assistants (Claude and others) working in thi
 
 ```
 email-agent/
-├── README.md      # Minimal placeholder
-└── CLAUDE.md      # This file
+├── src/
+│   ├── scrapers/
+│   │   ├── base.py                  # BaseScraper ABC + Article dataclass
+│   │   ├── cna.py                   # Channel NewsAsia — Business
+│   │   ├── business_times.py        # The Business Times — Singapore
+│   │   ├── manufacturing_asia.py    # Manufacturing Asia
+│   │   ├── sbr.py                   # Singapore Business Review
+│   │   ├── abf.py                   # Asian Banking & Finance
+│   │   ├── techinasia.py            # Tech in Asia — Singapore tag
+│   │   └── theedge.py               # The Edge Singapore — News
+│   ├── agent/
+│   │   ├── analyzer.py              # Claude API: summary / companies / angle
+│   │   └── db.py                    # SQLite deduplication store
+│   ├── email/
+│   │   ├── formatter.py             # HTML email table builder
+│   │   └── sender.py                # Gmail SMTP sender
+│   └── prompts/
+│       └── analysis.py              # Versioned Claude prompt templates
+├── data/                            # Runtime data — gitignored
+│   └── sent_articles.db             # SQLite dedup DB (auto-created)
+├── main.py                          # Scheduler entry point
+├── requirements.txt
+├── .env.example
+├── .gitignore
+├── README.md
+└── CLAUDE.md
 ```
-
-No source code, dependencies, tests, CI/CD, or configuration files exist yet. All structure below represents conventions to follow **as the project is built out**.
 
 ---
 
@@ -39,38 +61,53 @@ git push -u origin <branch-name>
 
 ---
 
-## Development Setup (to be implemented)
+## Development Setup
 
-When dependencies are added, document setup steps here. Typical bootstrap:
+### Prerequisites
+
+- Python 3.10+
+- A Gmail account with an [App Password](https://support.google.com/accounts/answer/185833) enabled
+- An Anthropic API key
+
+### Bootstrap
 
 ```bash
-# Install dependencies (Node.js example)
-npm install
+# Create and activate virtual environment
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 
-# Copy environment template
+# Install dependencies
+pip install -r requirements.txt
+
+# Copy environment template and fill in your values
 cp .env.example .env
+```
 
-# Run development server
-npm run dev
+### Running
 
-# Run tests
-npm test
+```bash
+# Run a single digest immediately (for testing):
+python main.py --once
+
+# Start the scheduler (runs continuously at 00:00, 08:00, 16:00 SGT):
+python main.py
 ```
 
 ---
 
 ## Environment Variables
 
-Document all required environment variables in `.env.example`. **Never commit `.env` files.** Expected variables for an email agent typically include:
+All secrets live in `.env` (never committed). Copy `.env.example` and fill in:
 
-| Variable | Purpose |
-|---|---|
-| `ANTHROPIC_API_KEY` | Claude API access |
-| `EMAIL_HOST` | SMTP/IMAP server host |
-| `EMAIL_PORT` | Server port |
-| `EMAIL_USER` | Email account username |
-| `EMAIL_PASS` | Email account password |
-| `EMAIL_FROM` | Sender address |
+| Variable | Purpose | Required |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | Claude API key | Yes |
+| `EMAIL_HOST` | SMTP server (default: `smtp.gmail.com`) | No |
+| `EMAIL_PORT` | SMTP port (default: `587`) | No |
+| `EMAIL_USER` | Gmail address | Yes |
+| `EMAIL_PASS` | Gmail App Password | Yes |
+| `EMAIL_FROM` | Sender address (defaults to `EMAIL_USER`) | No |
+| `EMAIL_TO` | Recipient email address | Yes |
 
 Add new variables to `.env.example` with placeholder values whenever they are introduced.
 
@@ -80,37 +117,19 @@ Add new variables to `.env.example` with placeholder values whenever they are in
 
 ### Language & Runtime
 
-Document the chosen language/runtime here once decided. Recommended defaults for an email agent:
-
-- **Node.js + TypeScript** — strong ecosystem for email (`nodemailer`, `imapflow`) and AI SDKs
-- **Python** — alternative if data processing or ML tasks dominate
-
-### File Structure (recommended)
-
-```
-src/
-├── agent/          # Core agent logic (LLM orchestration, tool use)
-├── email/          # Email read/send/parse utilities
-├── tools/          # Agent tools (search, calendar, CRM, etc.)
-├── prompts/        # System prompts and prompt templates
-├── types/          # Shared TypeScript types/interfaces
-└── index.ts        # Entry point
-tests/
-├── unit/
-└── integration/
-```
+**Python 3.10+** — chosen for its strong web scraping ecosystem (`requests`, `beautifulsoup4`, `feedparser`) and the `anthropic` SDK.
 
 ### Code Style
 
-- Follow the linter/formatter config in the repository (ESLint + Prettier for TS, Ruff for Python)
-- Run lint and format before committing
-- Prefer explicit types over `any` in TypeScript
+- Format with **Ruff** (`ruff format .`) before committing
+- Lint with **Ruff** (`ruff check .`)
 - Keep functions small and single-purpose
-- Co-locate tests with source files (`*.test.ts`) or place them under `tests/`
+- Use `from __future__ import annotations` for forward-compatible type hints
+- Tests live under `tests/`
 
 ### Commit Messages
 
-Use the conventional commits format:
+Use conventional commits format:
 
 ```
 <type>(<scope>): <short summary>
@@ -122,74 +141,75 @@ Types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `ci`
 
 Examples:
 ```
-feat(email): add IMAP inbox polling with idle support
-fix(agent): handle rate limit errors from Anthropic API
-docs: update CLAUDE.md with environment variables
+feat(scrapers): add Business Times RSS feed support
+fix(agent): handle Claude rate limit with exponential backoff
+docs: update CLAUDE.md with run instructions
 ```
+
+---
+
+## Architecture
+
+### Pipeline (per run)
+
+1. **Scrape** — each of the 7 scrapers runs, returning `Article` objects from the last 8 hours (RSS feed first, HTML fallback)
+2. **Deduplicate** — articles whose URLs are in `data/sent_articles.db` are skipped
+3. **Analyze** — Claude (`claude-sonnet-4-6`) processes each new article to produce: summary (≤30 words), companies identified, insurance-broker angle (≤30 words)
+4. **Mark sent** — processed article URLs are written to SQLite
+5. **Format** — articles are rendered into an HTML email table grouped by source
+6. **Send** — Gmail SMTP delivers the email to `EMAIL_TO`
+
+### Scraper Design
+
+Each scraper:
+1. Tries RSS feeds first (more reliable, structured dates)
+2. Falls back to HTML scraping with multiple CSS selector attempts
+3. Filters to articles published in the last 8 hours
+4. Adds a 1–3 second polite delay between HTTP requests
 
 ---
 
 ## AI / Agent Conventions
 
-Since this is an AI-powered agent, follow these practices:
-
 ### LLM Usage
 
-- Default to `claude-sonnet-4-6` for general tasks; use `claude-haiku-4-5-20251001` for high-throughput, low-latency calls
-- Always pass system prompts from versioned files in `src/prompts/`, not hardcoded strings
-- Log all LLM inputs/outputs in development for debugging (strip in production or use structured logging)
-
-### Tool Use
-
-- Define agent tools with clear `name`, `description`, and `input_schema`
-- Validate all tool inputs before execution
-- Handle tool errors gracefully and return structured error messages to the agent
+- Model: `claude-sonnet-4-6` for article analysis
+- System prompts are versioned in `src/prompts/` — never hardcode prompts inline
+- Each article gets one API call; responses must be valid JSON
 
 ### Security
 
-- Never expose raw email credentials or API keys in logs or LLM context
-- Sanitize email content before passing to the LLM to avoid prompt injection
-- Limit tool permissions to least privilege (e.g., read-only email access unless write is needed)
+- Never expose API keys or email passwords in logs or LLM context
+- Article text is truncated to 3000 chars before sending to Claude (cost + injection surface control)
+- Email credentials are read only from environment variables
 
 ---
 
 ## Testing
 
-- Write unit tests for all pure functions (email parsing, prompt building, etc.)
-- Write integration tests for agent workflows using mocked LLM responses
-- Do not make real API calls in automated tests; use recorded fixtures or mocks
-- Target ≥80% coverage on core agent and email modules
-
 Run tests:
 
 ```bash
-npm test            # unit tests
-npm run test:int    # integration tests
+python -m pytest tests/
 ```
 
----
-
-## CI/CD
-
-Add a GitHub Actions workflow at `.github/workflows/ci.yml` when the project is ready. It should:
-
-1. Install dependencies
-2. Run linter
-3. Run type-check
-4. Run tests
-5. Build (if applicable)
+- Unit tests: pure functions (prompt building, HTML formatting, date parsing)
+- Integration tests: mocked LLM responses and SMTP
+- No real API calls in automated tests
 
 ---
 
-## Key Dependencies (to be added)
+## Key Dependencies
 
 | Package | Purpose |
 |---|---|
-| `@anthropic-ai/sdk` | Anthropic Claude API client |
-| `nodemailer` | SMTP email sending |
-| `imapflow` | IMAP email reading |
-| `zod` | Schema validation for tool inputs |
-| `dotenv` | Environment variable loading |
+| `anthropic` | Anthropic Claude API client |
+| `requests` | HTTP requests for scraping |
+| `beautifulsoup4` + `lxml` | HTML parsing |
+| `feedparser` | RSS/Atom feed parsing |
+| `APScheduler` | Cron-style job scheduling |
+| `python-dotenv` | `.env` file loading |
+| `pytz` | SGT timezone support |
 
 ---
 
@@ -199,7 +219,7 @@ Add a GitHub Actions workflow at `.github/workflows/ci.yml` when the project is 
 - Do not add features beyond what is requested in the current task
 - Do not delete files without confirming they are unused
 - Do not push to `master` directly
-- Do not commit `.env`, `node_modules/`, build artifacts, or log files
+- Do not commit `.env`, `data/`, `__pycache__/`, or log files
 
 ---
 
@@ -208,8 +228,6 @@ Add a GitHub Actions workflow at `.github/workflows/ci.yml` when the project is 
 Update CLAUDE.md whenever:
 
 - New environment variables are added
-- A new top-level directory is introduced
-- Build, test, or run commands change
+- A new top-level directory or module is introduced
+- Run or test commands change
 - A significant architectural decision is made
-
-Keep this file accurate — it is the primary reference for AI assistants working in this codebase.
