@@ -89,24 +89,24 @@ def run_digest() -> None:
     scraper_instance = CNAScraper()  # use BaseScraper's fetch_article_text
     enriched = analyze_articles(new_articles, scraper_instance.fetch_article_text)
 
-    # 4. Mark all as sent
-    for article in new_articles:
-        mark_sent(article.url, article.title)
-
-    # 5. Build email
+    # 4. Build email
     now_sgt = datetime.now(tz=SGT)
     subject = f"SG Business News Digest — {now_sgt.strftime('%d %b %Y, %I:%M %p')} SGT"
     html_body = build_html_email(enriched)
 
-    # 6. Send email (skip if no EMAIL_TO configured)
+    # 5. Send email, then mark as sent only on success
     if os.environ.get("EMAIL_TO"):
         try:
             send_email(html_body, subject)
             logger.info("Email sent: %d article(s)", len(enriched))
+            for article in new_articles:
+                mark_sent(article.url, article.title)
         except Exception as exc:
             logger.error("Failed to send email: %s", exc)
     else:
         logger.warning("EMAIL_TO not set — email not sent. Set it in .env to enable delivery.")
+        for article in new_articles:
+            mark_sent(article.url, article.title)
 
     logger.info("=== Digest run complete ===")
 
